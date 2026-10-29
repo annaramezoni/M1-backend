@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import multer from "multer";
+import cors from "cors";
 import PredictionApi from "@azure/cognitiveservices-customvision-prediction";
 import msRest from "@azure/ms-rest-js";
 
@@ -10,30 +11,39 @@ const projectId = process.env.VISION_PROJECT_ID; // from the Custom Vision porta
 const publishIterationName = "Iteration1";
 
 const credentials = new msRest.ApiKeyCredentials({
+  // Add the Azure prediction key to the request header so Azure can authenticate our request.
   inHeader: { "Prediction-key": predictionKey },
 });
+
+// Create a client to communicate with Azure Custom Vision.
+// It uses our credentials and the Azure prediction endpoint.
 const predictor = new PredictionApi.PredictionAPIClient(
   credentials,
   predictionEndpoint,
 );
 
 const app = express();
-const upload = multer(); // keeps the upload in memory as a Buffer
+app.use(cors());
+
+// Configure Multer to receive uploaded files and store them temporarily in memory as a Buffer (binary image data).
+const upload = multer();
 
 app.post("/", upload.single("image"), async (req, res) => {
   try {
-    const results = await predictor.classifyImage(
+    const result = await predictor.classifyImage(
       projectId,
       publishIterationName,
       req.file.buffer,
     );
 
-    res.json(
-      results.predictions.map((p) => ({
-        tag: p.tagName,
-        probability: p.probability,
-      })),
+    const bestPrediction = result.predictions.reduce((best, current) =>
+      current.probability > best.probability ? current : best,
     );
+
+    res.json({
+      "Vehicle Type": bestPrediction.tagName,
+      Probability: bestPrediction.probability,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Classification failed" });
